@@ -39,6 +39,28 @@ export const VideoCard: React.FC<MediaCardProps> = ({ video }) => {
     };
   }, [video.uri, video.type]);
 
+  // Global Audio Manager: Pause others when this one plays
+  useEffect(() => {
+    const handleGlobalPlay = (e: CustomEvent) => {
+        if (e.detail.id !== video.id && videoRef.current && !videoRef.current.paused) {
+            videoRef.current.pause();
+            setIsPlaying(false);
+        }
+    };
+
+    window.addEventListener('instasplit-play', handleGlobalPlay as EventListener);
+    return () => {
+        window.removeEventListener('instasplit-play', handleGlobalPlay as EventListener);
+    };
+  }, [video.id]);
+
+  const handlePlay = () => {
+      setIsPlaying(true);
+      // Notify others to stop
+      const event = new CustomEvent('instasplit-play', { detail: { id: video.id } });
+      window.dispatchEvent(event);
+  };
+
   const handleShare = async () => {
       if (!mediaUrl) return;
       setIsSharing(true);
@@ -60,10 +82,10 @@ export const VideoCard: React.FC<MediaCardProps> = ({ video }) => {
       if (!videoRef.current) return;
       if (videoRef.current.paused) {
           videoRef.current.play();
-          setIsPlaying(true);
+          // setIsPlaying is handled by onPlay
       } else {
           videoRef.current.pause();
-          setIsPlaying(false);
+          // setIsPlaying is handled by onPause
       }
   };
 
@@ -122,7 +144,7 @@ export const VideoCard: React.FC<MediaCardProps> = ({ video }) => {
                     src={mediaUrl} 
                     className="w-full h-full object-contain cursor-pointer"
                     onClick={togglePlay}
-                    onPlay={() => setIsPlaying(true)}
+                    onPlay={handlePlay}
                     onPause={() => setIsPlaying(false)}
                     onTimeUpdate={handleTimeUpdate}
                     playsInline
