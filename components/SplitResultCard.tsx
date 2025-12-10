@@ -1,7 +1,7 @@
 
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { SplitSegment, SplitOptions } from '../types';
-import { shareVideo } from '../services/geminiService';
+import { shareMedia, downloadMedia } from '../services/geminiService';
 import { renderClip } from '../services/videoService';
 
 interface SplitResultCardProps {
@@ -16,6 +16,11 @@ export const SplitResultCard: React.FC<SplitResultCardProps> = ({ segment, video
   const [progress, setProgress] = useState(0);
   const [downloadUrl, setDownloadUrl] = useState<string | null>(null);
   const [showWatermark, setShowWatermark] = useState(true);
+
+  // Player State
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [isMuted, setIsMuted] = useState(false);
+  const videoRef = useRef<HTMLVideoElement>(null);
 
   // Use the time fragment for preview only
   const previewSrc = `${videoUrl}#t=${segment.startTime},${segment.endTime}`;
@@ -38,14 +43,13 @@ export const SplitResultCard: React.FC<SplitResultCardProps> = ({ segment, video
         const fileName = `instasplit-${segment.title.replace(/\s+/g, '-').toLowerCase()}.mp4`;
 
         if (action === 'download') {
-            const a = document.createElement('a');
-            a.href = finalUrl;
-            a.download = fileName;
-            document.body.appendChild(a);
-            a.click();
-            document.body.removeChild(a);
+            downloadMedia(finalUrl, fileName);
         } else if (action === 'share') {
-            await shareVideo(finalUrl, segment.title);
+            const success = await shareMedia(finalUrl, segment.title, 'video');
+            if (!success) {
+                downloadMedia(finalUrl, fileName);
+                alert("Sharing unavailable. File downloaded.");
+            }
         }
 
     } catch (e) {
@@ -55,6 +59,34 @@ export const SplitResultCard: React.FC<SplitResultCardProps> = ({ segment, video
         setIsProcessing(false);
         setProgress(0);
     }
+  };
+
+  const togglePlay = () => {
+      if (!videoRef.current) return;
+      if (videoRef.current.paused) {
+          videoRef.current.play();
+          setIsPlaying(true);
+      } else {
+          videoRef.current.pause();
+          setIsPlaying(false);
+      }
+  };
+
+  const toggleMute = (e: React.MouseEvent) => {
+      e.stopPropagation();
+      if (!videoRef.current) return;
+      videoRef.current.muted = !videoRef.current.muted;
+      setIsMuted(videoRef.current.muted);
+  };
+
+  const toggleFullscreen = (e: React.MouseEvent) => {
+      e.stopPropagation();
+      if (!videoRef.current) return;
+      if (document.fullscreenElement) {
+          document.exitFullscreen();
+      } else {
+          videoRef.current.requestFullscreen();
+      }
   };
 
   const scoreColor = segment.viralScore > 80 ? 'text-green-400' : segment.viralScore > 50 ? 'text-yellow-400' : 'text-zinc-400';
@@ -102,7 +134,7 @@ export const SplitResultCard: React.FC<SplitResultCardProps> = ({ segment, video
       </div>
 
       {/* Video Content */}
-      <div className={`relative ${aspectRatioClass} bg-zinc-900 transition-all duration-300`}>
+      <div className={`relative ${aspectRatioClass} bg-zinc-900 transition-all duration-300 group/video`}>
         
         {/* Top Tier Badge (Star) */}
         {isTopTier && (
@@ -129,11 +161,52 @@ export const SplitResultCard: React.FC<SplitResultCardProps> = ({ segment, video
 
         {/* Note: The preview video uses CSS object-cover to simulate crop preview, actual crop happens in renderClip */}
         <video 
+            ref={videoRef}
             src={previewSrc}
-            controls
-            className={`w-full h-full ${targetRatio === 'Original' ? 'object-contain' : 'object-cover'}`}
+            className={`w-full h-full ${targetRatio === 'Original' ? 'object-contain' : 'object-cover'} cursor-pointer`}
             preload="metadata"
+            onClick={togglePlay}
+            onPlay={() => setIsPlaying(true)}
+            onPause={() => setIsPlaying(false)}
+            playsInline
         />
+
+        {/* Custom Controls Overlay */}
+        <div className={`absolute inset-0 bg-black/20 transition-opacity duration-300 flex flex-col justify-end ${isPlaying ? 'opacity-0 group-hover/video:opacity-100' : 'opacity-100'}`}>
+            
+            {/* Center Play Button */}
+            {!isPlaying && (
+                <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                    <div className="w-14 h-14 bg-white/20 backdrop-blur-md rounded-full flex items-center justify-center border border-white/30">
+                        <svg className="w-7 h-7 text-white fill-current ml-1" viewBox="0 0 24 24"><path d="M8 5v14l11-7z" /></svg>
+                    </div>
+                </div>
+            )}
+
+            {/* Bottom Controls */}
+            <div className="p-3 bg-gradient-to-t from-black/90 to-transparent flex items-center justify-between z-20">
+                <div onClick={togglePlay} className="cursor-pointer text-white hover:text-pink-500 transition-colors">
+                    {isPlaying ? (
+                        <svg className="w-6 h-6 fill-current" viewBox="0 0 24 24"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z" /></svg>
+                    ) : (
+                        <svg className="w-6 h-6 fill-current" viewBox="0 0 24 24"><path d="M8 5v14l11-7z" /></svg>
+                    )}
+                </div>
+
+                <div className="flex items-center gap-3">
+                    <button onClick={toggleMute} className="text-white hover:text-pink-500 transition-colors" title="Toggle Volume">
+                        {isMuted ? (
+                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z" stroke="currentColor"/><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2" /></svg>
+                        ) : (
+                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.536 8.464a5 5 0 010 7.072m2.828-9.9a9 9 0 010 12.728M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z" /></svg>
+                        )}
+                    </button>
+                    <button onClick={toggleFullscreen} className="text-white hover:text-pink-500 transition-colors" title="Fullscreen">
+                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4" /></svg>
+                    </button>
+                </div>
+            </div>
+        </div>
         
         {/* Improved Watermark Element with Logo and Border */}
         {showWatermark && (
@@ -160,7 +233,7 @@ export const SplitResultCard: React.FC<SplitResultCardProps> = ({ segment, video
             </div>
         )}
 
-        <div className="absolute bottom-4 right-4 flex flex-col gap-3 items-center z-10">
+        <div className="absolute bottom-16 right-4 flex flex-col gap-3 items-center z-20">
              <div className="flex flex-col items-center gap-1 group/score cursor-help relative">
                  <div className="w-10 h-10 rounded-full bg-black/60 backdrop-blur border border-zinc-700 flex items-center justify-center shadow-lg">
                     <span className={`font-bold ${scoreColor} text-sm`}>{segment.viralScore}</span>

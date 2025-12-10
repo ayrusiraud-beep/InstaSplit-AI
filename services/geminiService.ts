@@ -27,11 +27,20 @@ export const promptSelectKey = async (): Promise<boolean> => {
     return true;
 }
 
+// Centralized client creation with validation
+const getAiClient = () => {
+    const key = process.env.API_KEY;
+    if (!key) {
+        throw new Error("API_KEY_INVALID");
+    }
+    return new GoogleGenAI({ apiKey: key });
+};
+
 export const enhancePrompt = async (simplePrompt: string): Promise<string> => {
     if (!simplePrompt.trim()) return "";
-    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
     
     try {
+        const ai = getAiClient();
         const response = await ai.models.generateContent({
             model: 'gemini-2.5-flash',
             contents: `Rewrite the following prompt to be highly detailed, cinematic, and visual. 
@@ -39,17 +48,18 @@ export const enhancePrompt = async (simplePrompt: string): Promise<string> => {
             Original: "${simplePrompt}"`,
         });
         return response.text || simplePrompt;
-    } catch (e) {
+    } catch (e: any) {
         console.error("Enhance failed", e);
+        if (e.message === 'API_KEY_INVALID') throw e;
         return simplePrompt;
     }
 };
 
 export const generatePromptFromImage = async (base64Image: string): Promise<string> => {
-    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
     const cleanBase64 = base64Image.split(',')[1] || base64Image;
 
     try {
+        const ai = getAiClient();
         const response = await ai.models.generateContent({
             model: 'gemini-2.5-flash',
             contents: {
@@ -67,14 +77,13 @@ export const generatePromptFromImage = async (base64Image: string): Promise<stri
 };
 
 export const generateImage = async (config: VideoConfig): Promise<string> => {
-    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-    
     let finalPrompt = config.prompt;
     if (config.style && config.style !== 'None') {
         finalPrompt = `${config.style} style. ${finalPrompt}`;
     }
 
     try {
+        const ai = getAiClient();
         const response = await ai.models.generateContent({
             model: 'gemini-2.5-flash-image',
             contents: {
@@ -101,8 +110,6 @@ export const generateImage = async (config: VideoConfig): Promise<string> => {
 }
 
 export const generateVeoVideo = async (config: VideoConfig): Promise<string> => {
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-
   let finalPrompt = config.prompt;
   if (config.style && config.style !== 'None') {
     finalPrompt = `${config.style} style. ${finalPrompt}`;
@@ -112,6 +119,7 @@ export const generateVeoVideo = async (config: VideoConfig): Promise<string> => 
   const veoAspectRatio = (config.aspectRatio === '16:9' || config.aspectRatio === '9:16') ? config.aspectRatio : '9:16';
 
   try {
+    const ai = getAiClient();
     const payload: any = {
       model: 'veo-3.1-fast-generate-preview',
       prompt: finalPrompt,
@@ -157,12 +165,11 @@ export const generateVeoVideo = async (config: VideoConfig): Promise<string> => 
 };
 
 export const analyzeVideoFrame = async (base64Frame: string): Promise<{title: string, description: string, viralScore: number, explanation: string, hashtags: string[]}> => {
-    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-    
     // Remove header if present
     const cleanBase64 = base64Frame.split(',')[1] || base64Frame;
 
     try {
+        const ai = getAiClient();
         const response = await ai.models.generateContent({
             model: 'gemini-2.5-flash',
             contents: {
@@ -229,14 +236,17 @@ export const fetchAuthenticatedVideoUrl = async (uri: string): Promise<string> =
     }
 }
 
-export const shareVideo = async (videoUrl: string, title: string): Promise<void> => {
+export const shareMedia = async (url: string, title: string, type: 'video' | 'image'): Promise<boolean> => {
     try {
-        // Fetch the blob from the blob URL
-        const response = await fetch(videoUrl);
+        // Fetch the blob from the blob URL or remote URL
+        const response = await fetch(url);
         const blob = await response.blob();
         
+        const mimeType = type === 'video' ? 'video/mp4' : 'image/jpeg';
+        const ext = type === 'video' ? 'mp4' : 'jpg';
+        
         // Create a File object
-        const file = new File([blob], `${title.replace(/\s+/g, '-').toLowerCase()}.mp4`, { type: 'video/mp4' });
+        const file = new File([blob], `${title.replace(/\s+/g, '-').toLowerCase()}.${ext}`, { type: mimeType });
 
         // Check if sharing is supported
         if (navigator.canShare && navigator.canShare({ files: [file] })) {
@@ -245,11 +255,24 @@ export const shareVideo = async (videoUrl: string, title: string): Promise<void>
                 title: title,
                 text: `${title} - Created with InstaSplit AI #instasplit #ai`,
             });
-        } else {
-            throw new Error("Sharing not supported on this device/browser.");
+            return true;
         }
-    } catch (error) {
+        return false;
+    } catch (error: any) {
+        if (error.name === 'AbortError' || error.name === 'NotAllowedError') {
+             // User cancelled, treat as handled
+             return true; 
+        }
         console.error("Share failed:", error);
-        throw error;
+        return false;
     }
+};
+
+export const downloadMedia = (url: string, filename: string) => {
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
 };

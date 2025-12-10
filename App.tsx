@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { VideoConfig, GeneratedMedia, AspectRatio, UserUsage } from './types';
-import { ensureApiKey, generateVeoVideo, generateImage, promptSelectKey, enhancePrompt, generatePromptFromImage } from './services/geminiService';
+import { ensureApiKey, generateVeoVideo, generateImage, promptSelectKey, enhancePrompt, generatePromptFromImage, fetchAuthenticatedVideoUrl, downloadMedia } from './services/geminiService';
 import { extractFrameFromFile } from './services/videoService';
 import { Button } from './components/Button';
 import { Loader } from './components/Loader';
@@ -91,6 +91,7 @@ const App: React.FC = () => {
   const [showPricing, setShowPricing] = useState(false);
   const [coins, setCoins] = useState(0);
   const [usage, setUsage] = useState<UserUsage>({ date: '', veoCount: 0, splitCount: 0 });
+  const [isBatchDownloading, setIsBatchDownloading] = useState(false);
 
   // Constants
   const STYLES = ['90s Retro', 'Cinematic', 'Cyberpunk', 'Minimalist', 'Anime', 'Vintage VHS', 'Realistic'];
@@ -191,8 +192,12 @@ const App: React.FC = () => {
       try {
           const enhanced = await enhancePrompt(prompt);
           setPrompt(enhanced);
-      } catch (e) {
+      } catch (e: any) {
           console.error(e);
+          if (e.message === 'API_KEY_INVALID') {
+            setErrorMsg("API Key Missing. Please select a key or configure .env");
+            setHasKey(false);
+          }
       } finally {
           setIsEnhancing(false);
       }
@@ -204,9 +209,14 @@ const App: React.FC = () => {
       try {
           const generatedPrompt = await generatePromptFromImage(startImage);
           setPrompt(generatedPrompt);
-      } catch (e) {
+      } catch (e: any) {
           console.error(e);
-          alert("Failed to generate prompt from image.");
+          if (e.message === 'API_KEY_INVALID') {
+             setErrorMsg("API Key Missing. Please select a key or configure .env");
+             setHasKey(false);
+          } else {
+             alert("Failed to generate prompt from image.");
+          }
       } finally {
           setIsEnhancing(false);
       }
@@ -290,7 +300,7 @@ const App: React.FC = () => {
     } catch (error: any) {
       console.error("Generation error:", error);
       if (error.message === 'API_KEY_INVALID') {
-        setErrorMsg("API Key invalid or not found. If running locally, please set API_KEY env var.");
+        setErrorMsg("API Key invalid or not found. If running locally, please add API_KEY to your .env file.");
         setHasKey(false);
       } else {
         setErrorMsg(error.message || "Failed to generate. Please try again.");
@@ -301,12 +311,44 @@ const App: React.FC = () => {
   };
 
   const handleSelectKey = async () => {
+      if (!window.aistudio) {
+          alert("API Key selection is only available in Google AI Studio. If running locally, please add API_KEY to your .env file.");
+          return;
+      }
       const result = await promptSelectKey();
       if (result) {
           setHasKey(true);
           setErrorMsg(null);
       }
   }
+
+  const handleBatchDownload = async () => {
+      if (media.length === 0) return;
+      if (!confirm(`Download all ${media.length} items? This might take a moment.`)) return;
+
+      setIsBatchDownloading(true);
+      
+      for (const item of media) {
+          try {
+              let url = item.uri;
+              // If it's a Veo video (not data uri), we need to fetch auth url if not already
+              if (item.type === 'video' && !url.startsWith('data:')) {
+                  url = await fetchAuthenticatedVideoUrl(url);
+              }
+              
+              const ext = item.type === 'video' ? 'mp4' : 'jpg';
+              const filename = `instasplit-${item.timestamp}-${item.prompt.slice(0, 10).replace(/\s/g, '-')}.${ext}`;
+              
+              downloadMedia(url, filename);
+              
+              // Small delay to prevent browser throttling downloads
+              await new Promise(r => setTimeout(r, 800)); 
+          } catch (e) {
+              console.error("Failed to download item", item.id);
+          }
+      }
+      setIsBatchDownloading(false);
+  };
 
   // Get available ratios based on type
   const availableRatios: AspectRatio[] = generationType === 'image' 
@@ -459,7 +501,14 @@ const App: React.FC = () => {
 
         {mode === 'split' ? (
              <VideoSplitter 
-                onError={setErrorMsg} 
+                onError={(msg) => {
+                     if (msg === 'API_KEY_INVALID') {
+                         setErrorMsg("API Key Missing. Please select a key or configure .env");
+                         setHasKey(false);
+                     } else {
+                         setErrorMsg(msg);
+                     }
+                }} 
                 isPro={isPro}
                 currentUsage={usage.splitCount}
                 limit={MAX_FREE_SPLIT_NO_WATERMARK}
@@ -629,7 +678,26 @@ const App: React.FC = () => {
                         <span className="w-2 h-2 rounded-full bg-pink-500"></span>
                         Recent Generations
                         </h2>
-                        <span className="text-sm text-zinc-500">{media.length} items</span>
+                        
+                        <div className="flex items-center gap-3">
+                             <span className="text-sm text-zinc-500">{media.length} items</span>
+                             {media.length > 0 && (
+                                 <button 
+                                    onClick={handleBatchDownload}
+                                    disabled={isBatchDownloading}
+                                    className="text-xs font-semibold bg-zinc-800 hover:bg-zinc-700 text-white px-3 py-1.5 rounded-lg transition-colors flex items-center gap-1 disabled:opacity-50"
+                                 >
+                                    {isBatchDownloading ? (
+                                        <span className="animate-pulse">Downloading...</span>
+                                    ) : (
+                                        <>
+                                            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
+                                            Download All
+                                        </>
+                                    )}
+                                 </button>
+                             )}
+                        </div>
                     </div>
 
                     <div className="grid grid-cols-1 gap-8">
