@@ -1,0 +1,22 @@
+
+{
+  "name": "Instasplit AI",
+  "short_name": "Instasplit",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#000000",
+  "theme_color": "#000000",
+  "orientation": "portrait",
+  "icons": [
+    {
+      "src": "https://img.icons8.com/color/192/video-editing.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "https://img.icons8.com/color/512/video-editing.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}
